@@ -7,10 +7,14 @@ import csv
 from datetime import datetime
 import typing
 from typing import Dict, List
-
+import plotly.graph_objects as plt
+from plotly.offline import plot
+import plotly
 import toml
+import os
 
 from transaction import Transaction
+
 
 
 def parse_csv(fname: str) -> List[Transaction]:
@@ -36,57 +40,16 @@ def parse_csv(fname: str) -> List[Transaction]:
 
     return transactions
 
-
-def add_paystub(f: typing.IO,
-                earnings: float,
-                pretax_vals: Dict,
-                *,
-                scale: float = 2,
-                use_percent: bool = False) -> int:
-    """Create SankeyMatic strings from configuration income+pretax info
-
-    Args:
-        f: output file
-        earnings: net income
-        pretax_vals: dictionary with all pretax items and their value
-        scale: scaling factor to apply to all values (based on time period)
-        use_percent: use percentages or absolute vals
-
-        The format is:
-            {Source} [{Amount}] {Type}
-
-        Returns:
-            total take home income over the plotting period
-    """
-    take_home = earnings * scale
-    if use_percent:
-        f.write(f'Spending [{int(100)}] Wages\n')
-    else:
-        f.write(f'Spending [{int(take_home)}] Wages\n')
-
-    sorted_pretax = sorted(pretax_vals.items(), key=lambda kv: kv[1])
-    sorted_pretax.reverse()
-    for name, value in sorted_pretax:
-        if use_percent:
-            f.write(f'Wages [{int(100 * value / earnings)}] {name}\n')
-        else:
-            f.write(f'Wages [{int(value * scale)}] {name}\n')
-
-        take_home -= value * scale
-
-    if use_percent:
-        val = int(100 * take_home / earnings / scale)
-    else:
-        val = int(take_home)
-    f.write(f'Wages [{val}] Take Home\n')
-
-    return int(take_home)
-
-
-def filter_transactions(transactions: List[Transaction], start_date: datetime,
-                        end_date: datetime, vendors: List[str],
-                        categories: List[str], ignore: bool,
-                        use_labels: bool) -> List[Transaction]:
+def filter_transactions(
+    transactions: List[Transaction], 
+    start_date: datetime,
+    end_date: datetime, 
+    ignore_vendors: List[str],
+    ignore_categories: List[str], 
+    ignore_accounts: List[str],
+    ignore: bool,
+    use_labels: bool
+    ) -> List[Transaction]:
     """Filter transactions based on date, vendor, and type
 
     Args:
@@ -105,107 +68,41 @@ def filter_transactions(transactions: List[Transaction], start_date: datetime,
 
     filt_trans = []
     for t in transactions:
-        if t.date <= start_date or t.date >= end_date:
-            continue
+        #if t.date <= start_date or t.date >= end_date:
+        #    continue
 
         if ignore:
-            if t.vendor in vendors:
+            if t.vendor in ignore_vendors:
                 continue
 
-            if use_labels and t.label in categories:
+            if use_labels and t.label in ignore_categories:
                 continue
 
-            if t.category in categories:
+            if t.category in ignore_categories:
+                continue
+
+            if t.account in ignore_accounts:
                 continue
         else:
-            if vendors and t.vendor not in vendors:
+            if ignore_vendors and t.vendor not in ignore_vendors:
                 continue
 
-            if use_labels and t.label not in categories:
+            if use_labels and t.label not in ignore_categories:
                 continue
 
-            if not use_labels and t.category not in categories:
+            if not use_labels and t.category not in ignore_categories:
+                continue
+            
+            if ignore_accounts and t.account not in ignore_accounts:
                 continue
 
-        if not t.debit:
-            continue
+        #if not t.debit:
+        #    continue
 
         filt_trans.append(t)
     return filt_trans
 
-
-def summarize_transactions(transactions: List[Transaction], use_labels: bool,
-                           threshold: int) -> Dict[str, int]:
-    """Bundle transactions up by category and calculate total amount per
-
-    Args:
-        transactions: list of all transactions
-        use_labels: if True, uses labels instead of categories if they exist
-        threshold: minimum amount for a category
-            if below the threshold, the categorys thrown into "Misc"
-
-    Returns:
-        dict of category name, category value pairs
-    """
-    category_sums = {}
-    for t in transactions:
-        if use_labels and t.label != '':
-            category = t.label
-        else:
-            category = t.category
-
-        if category in category_sums:
-            category_sums[category] += t.amount
-        else:
-            category_sums[category] = t.amount
-
-    misc_amt = 0
-    for name in category_sums.copy():
-        if category_sums[name] < threshold:
-            misc_amt += category_sums.pop(name)
-
-    if misc_amt:
-        category_sums['Misc'] = misc_amt
-
-    return category_sums
-
-
-def add_work_transactions(f: typing.IO, transactions: List[Transaction],
-                          config: Dict):
-    """Generate SankeyMatic strings from filtered work transactions
-
-    Args:
-        f: output file
-        transactions: list of all transactions
-        config: config file
-    """
-
-    start_date = datetime.strptime(config['time']['start_date'], '%m/%d/%Y')
-    end_date = datetime.strptime(config['time']['end_date'], '%m/%d/%Y')
-
-    filt_trans = filter_transactions(
-        transactions=transactions,
-        start_date=start_date,
-        end_date=end_date,
-        vendors=[],
-        categories=['Work Purchase'],
-        ignore=False,
-        use_labels=config['transactions']['prefer_labels'])
-
-    summed_categories = summarize_transactions(
-        transactions=filt_trans,
-        use_labels=config['transactions']['prefer_labels'],
-        threshold=config['transactions']['category_threshold'])
-
-    work_total = sum(summed_categories.values())
-    if config['transactions']['use_percentages']:
-        f.write(f'Spending [100] Work\n')
-    else:
-        f.write(f'Spending [{work_total}] Work\n')
-
-
-def add_transactions(f: typing.IO, transactions: List[Transaction],
-                     take_home: int, config: Dict):
+def add_transactions(transactions: List[Transaction], config: Dict):
     """Generate SankeyMatic strings from filtered transactions
 
     Args:
@@ -215,41 +112,131 @@ def add_transactions(f: typing.IO, transactions: List[Transaction],
         config: config file
     """
 
-    start_date = datetime.strptime(config['time']['start_date'], '%m/%d/%Y')
-    end_date = datetime.strptime(config['time']['end_date'], '%m/%d/%Y')
+    # These two are placeholders, they won't be used to filter transactions
+    start_date = datetime.now()
+    end_date = datetime.now()
 
     filt_trans = filter_transactions(
         transactions=transactions,
         start_date=start_date,
         end_date=end_date,
-        vendors=config['transactions']['ignore_vendors'],
-        categories=config['transactions']['ignore_categories'],
+        ignore_vendors=config['transactions']['ignore_vendors'],
+        ignore_categories=config['transactions']['ignore_categories'],
+        ignore_accounts=config['transactions']['ignore_accounts'],
         ignore=True,
         use_labels=config['transactions']['prefer_labels'])
 
-    summed_categories = summarize_transactions(
-        transactions=filt_trans,
-        use_labels=config['transactions']['prefer_labels'],
-        threshold=config['transactions']['category_threshold'])
-
-    expenditure = 0
-    sorted_cat = sorted(summed_categories.items(), key=lambda kv: kv[1])
-    sorted_cat.reverse()
-    for name, value in sorted_cat:
-        if config['transactions']['use_percentages']:
-            f.write(f'Take Home [{int(100 * value / take_home)}] {name}\n')
+    income = {}
+    expense = {}
+    for tx in filt_trans:
+        if tx.debit:
+            # expense
+            if tx.category not in expense:
+                expense[tx.category] = {
+                    'amount': tx.amount,
+                    'subcategories': {tx.sub_category: tx.amount} if tx.sub_category != None else {}
+                    }
+            else:
+                expense[tx.category]['amount'] += tx.amount
+                if tx.sub_category == None:
+                    continue
+                if tx.sub_category not in expense[tx.category]['subcategories']:
+                    expense[tx.category]['subcategories'][tx.sub_category] = tx.amount
+                else:
+                    expense[tx.category]['subcategories'][tx.sub_category] += tx.amount
         else:
-            f.write(f'Take Home [{value}] {name}\n')
-        expenditure += value
+            # income
+            if tx.category != 'Income':
+                continue
+            if tx.category not in income:
+                income[tx.category] = {
+                    'amount': tx.amount,
+                    'subcategories': {tx.sub_category: tx.amount} if tx.sub_category != None else {}
+                    }
+            else:
+                income[tx.category]['amount'] += tx.amount
+                if tx.sub_category == None:
+                    continue
+                if tx.sub_category not in income[tx.category]['subcategories']:
+                    income[tx.category]['subcategories'][tx.sub_category] = tx.amount
+                else:
+                    income[tx.category]['subcategories'][tx.sub_category] += tx.amount
 
-    if config['transactions']['use_percentages']:
-        savings = int(100 * (take_home - expenditure) / take_home)
-    else:
-        savings = take_home - expenditure
-    f.write(f'Take Home [{savings}] Savings\n')
+    saving = income['Income']['amount'] - sum([expense[x]['amount'] for x in expense])
+    expense['Saving'] = {'amount': saving, 'subcategories': {}}
+    plot_data = {
+        'source': [],
+        'target': [],
+        'value': [],
+        'labels': [],
+    }
+    output = ''
+    sorted_keys = [x[0] for x in sorted(income.items(), key=lambda x:x[1]['amount'], reverse=True)]
+    for k in sorted_keys:
+        output += '{} [{}] Net Income\n'.format(k, income[k]['amount'])
+        plot_data['source'].append(k)
+        plot_data['target'].append('Net Income')
+        plot_data['value'].append(income[k]['amount'])
+        plot_data['labels'].append(k)
+        plot_data['labels'].append('Net Income')
+        for sk in income[k]['subcategories']:
+            output += '{} [{}] {}\n'.format(sk, income[k]['subcategories'][sk], k)
+            plot_data['source'].append(sk)
+            plot_data['target'].append(k)
+            plot_data['value'].append(income[k]['subcategories'][sk])
+            plot_data['labels'].append(k)
+            plot_data['labels'].append(sk)
+    
+    sorted_keys = [x[0] for x in sorted(expense.items(), key=lambda x:x[1]['amount'], reverse=True)]
+    for k in sorted_keys:
+        output += 'Net Income [{}] {}\n'.format(expense[k]['amount'], k)
+        plot_data['source'].append('Net Income')
+        plot_data['target'].append(k)
+        plot_data['value'].append(expense[k]['amount'])
+        plot_data['labels'].append(k)
+        plot_data['labels'].append('Net Income')
+        
+        for sk in expense[k]['subcategories']:
+            output += '{} [{}] {}\n'.format(k, expense[k]['subcategories'][sk], sk)
+            plot_data['source'].append(k)
+            plot_data['target'].append(sk)
+            plot_data['value'].append(expense[k]['subcategories'][sk])
+            plot_data['labels'].append(k)
+            plot_data['labels'].append(sk)
+
+    return plot_data, output
+
+def plot_sankey(data):
+    data['labels'] = list(set(data['labels']))
+    node_dict = {y:x for x, y in enumerate(data['labels'])}
+    source_node = [node_dict[x] for x in data['source']]
+    target_node = [node_dict[x] for x in data['target']]
+
+    fig = plt.Figure( 
+        data=[plt.Sankey(
+            arrangement = "snap",
+            node = dict( 
+                label = data['labels']
+            ),
+            link = dict(
+                source = source_node,
+                target = target_node,
+                value = data['value']
+            ))])
+
+    img = plotly.io.to_image(
+        fig=fig,
+        format='png',
+        width=1500,
+        height=1200,
+        )
+    html = plotly.io.to_html(
+        fig=fig
+    )
+    return img, html
 
 
-def main(*, config_file: str = None):
+def main(*, config_file: str = None, session_id: str = None):
     """Generate the SankeyMatic-formatted data"""
     if config_file:
         config_file = open(config_file, 'r')
@@ -262,34 +249,11 @@ def main(*, config_file: str = None):
     config = toml.load(config_file)
     config_file.close()
 
-    if config['paths']['use_custom_input']:
-        transactions = parse_csv(config['paths']['input_file'])
-    else:
-        transactions = parse_csv('data/transactions.csv')
+    transactions = parse_csv(os.path.join('/tmp', session_id, "input.csv"))
 
-    if config['paths']['use_custom_output']:
-        fname = config['paths']['output_path']
-    else:
-        fname = 'output.txt'
-
-    output_file = open(fname, 'w')
-
-    start_date = datetime.strptime(config['time']['start_date'], '%m/%d/%Y')
-    end_date = datetime.strptime(config['time']['end_date'], '%m/%d/%Y')
-    scale = (end_date - start_date).days / 14
-
-    take_home = add_paystub(
-        output_file,
-        config['paycheck']['net_earnings'],
-        config['paycheck']['pretax'],
-        scale=scale,
-        use_percent=config['transactions']['use_percentages'])
-
-    add_work_transactions(output_file, transactions, config)
-    add_transactions(output_file, transactions, take_home, config)
-
-    output_file.close()
-
+    plot_data, sankeymatic = add_transactions(transactions, config)
+    img, html = plot_sankey(plot_data)
+    return img, html, sankeymatic
 
 if __name__ == "__main__":
     main()

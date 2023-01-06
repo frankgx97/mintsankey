@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h3>PNG</h3>
+<p><a href="/{{ sessionid }}/sankey.png" target="_blank">/{{ sessionid }}/sankey.png</a></p>
+<h3>HTML</h3>
+<p><a href="/{{ sessionid }}/sankey.html" target="_blank">/{{ sessionid }}/sankey.html</a></p>
+<h3>SankeyMatic</h3>
+<p>The following output can be used to generate diagram at <a href="https://sankeymatic.com/build/" target="_blank">SankeyMatic</a></p>
+<p>We recommend this approach if you'd like to customize your diagram or manipulate the data.</p>
+<textarea id="w3review" name="w3review" rows="10" cols="50">
+{{ sankeymatic }}
+</textarea>
+{% endblock %}
