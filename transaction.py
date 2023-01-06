@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import List
+import categories
 
 
 class Transaction:
@@ -23,19 +24,22 @@ class Transaction:
                  amount: float = None,
                  debit: bool = None,
                  vendor: str = None,
-                 category: str = None,
+                 input_category: str = None,
+                 account: str = None,
                  label: str = None,
                  source: 'Transaction' = None):
         self.date = date
         self.vendor = vendor
         self.amount = amount
         self.debit = debit
-        self.category = category
+        self.input_category = input_category
+        self.category, self.sub_category = categories.get_categories(input_category)
+        self.account = account
         self.label = label
         self.source = source
 
     def __str__(self):
-        return f"<Transaction {self.vendor} {self.amount}>"
+        return f"<Transaction {self.vendor} {self.amount} {self.category} {self.sub_category} {self.input_category}>"
 
     def load_from_csv(self, data: List):
         """Store a csv-row of data in the object
@@ -47,8 +51,12 @@ class Transaction:
         self.vendor = data[1]
         self.amount = int(float(data[3]))
         self.debit = True if data[4] == 'debit' else False
-        self.category = data[5]
+        self.input_category = data[5]
+        self.account = data[6]
         self.label = data[7]
+        if 'GUSTO' in self.vendor:
+            self.input_category = 'Paycheck'
+        self.category, self.sub_category = categories.get_categories(self.input_category)
 
     def make_sakey_string(self) -> str:
         """Create a string with the relevant SakeyMatic formatting

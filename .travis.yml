@@ -1,9 +1,0 @@
-language: python
-python:
-    - "3.6"
-install:
-    - pip install -r requirements-dev.txt
-script:
-  coverage run -m pytest --cov=.
-after_sucess:
-  coveralls

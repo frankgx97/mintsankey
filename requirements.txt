@@ -1,1 +1,5 @@
-toml==0.9.4
+Flask==2.1.2
+plotly==5.11.0
+toml==0.10.2
+kaleido==0.2.1
+gunicorn==20.1.0
