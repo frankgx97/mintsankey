@@ -1,8 +1,11 @@
 import os
 import uuid
-from flask import Flask, flash, request, redirect, send_file, render_template
+from flask import Flask, flash, request, redirect, send_file, render_template, abort
 from werkzeug.utils import secure_filename
 import sankey_gen
+import threading
+import shutil
+import time
 
 
 UPLOAD_FOLDER = '/tmp'
@@ -23,7 +26,10 @@ def session(session_id, filename):
         mime = 'image/png'
     else:
         mime = 'text/html'
-    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], session_id, filename), mimetype=mime)
+    try:
+        return send_file(os.path.join(app.config['UPLOAD_FOLDER'], session_id, filename), mimetype=mime)
+    except FileNotFoundError as e:
+        abort(404)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -52,12 +58,23 @@ def generate():
             bf.write(img)
         with open(os.path.join(app.config['UPLOAD_FOLDER'], session_id, "sankey.html"), "w") as f:
             f.write(html)
-
+        
+        th = threading.Thread(target=cleanup, args=(os.path.join(app.config['UPLOAD_FOLDER'], session_id),))
+        th.start()
         return render_template('generate.html', sessionid=session_id, sankeymatic=sankeymatic)
 
 @app.errorhandler(500)
 def internal_server_error(e):
     return render_template('500.html'), 500
+
+@app.errorhandler(404)
+def internal_server_error(e):
+    return render_template('404.html'), 404
+
+def cleanup(path):
+    time.sleep(1 * 3600)
+    shutil.rmtree(path)
+    print(path, "cleaned up")
 
 if __name__ == '__main__':
    app.run(host='0.0.0.0', port=10080)
